@@ -2,37 +2,25 @@
 <oor:items xmlns:oor="http://openoffice.org/2001/registry"
            xmlns:xs="http://www.w3.org/2001/XMLSchema"
            xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance">
-
-  <!-- Substitution Calibri -> Carlito (metrics identiques) -->
   <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Calibri" oor:op="fuse"><value>Carlito</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Cambria" oor:op="fuse"><value>Caladea</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
+    <prop oor:name="Cambria Math" oor:op="fuse"><value>Caladea</value></prop>
     <prop oor:name="Arial" oor:op="fuse"><value>Liberation Sans</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Times New Roman" oor:op="fuse"><value>Liberation Serif</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Courier New" oor:op="fuse"><value>Liberation Mono</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Helvetica" oor:op="fuse"><value>Liberation Sans</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Verdana" oor:op="fuse"><value>DejaVu Sans</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Georgia" oor:op="fuse"><value>Liberation Serif</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Trebuchet MS" oor:op="fuse"><value>Liberation Sans</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.VCL/FontSubstitutions">
     <prop oor:name="Tahoma" oor:op="fuse"><value>Liberation Sans</value></prop>
+    <prop oor:name="Gill Sans MT" oor:op="fuse"><value>Liberation Sans</value></prop>
+    <prop oor:name="Century Gothic" oor:op="fuse"><value>URW Gothic</value></prop>
+    <prop oor:name="Garamond" oor:op="fuse"><value>TeX Gyre Pagella</value></prop>
+    <prop oor:name="Palatino Linotype" oor:op="fuse"><value>TeX Gyre Pagella</value></prop>
+    <prop oor:name="Book Antiqua" oor:op="fuse"><value>TeX Gyre Pagella</value></prop>
+    <prop oor:name="Segoe UI" oor:op="fuse"><value>Liberation Sans</value></prop>
+    <prop oor:name="Segoe UI Light" oor:op="fuse"><value>Liberation Sans</value></prop>
+    <prop oor:name="Segoe UI Semibold" oor:op="fuse"><value>Liberation Sans</value></prop>
   </item>
-
 </oor:items>
