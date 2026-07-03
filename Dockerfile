@@ -2,9 +2,17 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y \
     libreoffice \
+    fonts-liberation \
+    fonts-dejavu \
+    fonts-freefont-ttf \
+    fonts-urw-base35 \
+    fontconfig \
+    libgraphite2-3 \
+    libharfbuzz0b \
     --no-install-recommends \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f -v
 
 WORKDIR /app
 
