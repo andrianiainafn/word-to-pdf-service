@@ -12,22 +12,27 @@ app = Flask(__name__)
 ALLOWED_EXTENSIONS = {'docx', 'doc'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
-# Polices a remplacer directement dans le XML du docx
 FONT_MAP = {
-    'Calibri':            'Carlito',
-    'Cambria':            'Caladea',
-    'Cambria Math':       'Caladea',
-    'Segoe UI':           'Liberation Sans',
-    'Segoe UI Light':     'Liberation Sans',
-    'Segoe UI Semibold':  'Liberation Sans',
-    'Gill Sans MT':       'Liberation Sans',
-    'Century Gothic':     'URW Gothic',
-    'Garamond':           'TeX Gyre Pagella',
-    'Palatino Linotype':  'TeX Gyre Pagella',
-    'Book Antiqua':       'TeX Gyre Pagella',
+    'Calibri':              'Carlito',
+    'Calibri Light':        'Carlito',
+    'Calibri Bold':         'Carlito',
+    'Cambria':              'Caladea',
+    'Cambria Math':         'Caladea',
+    'Segoe UI':             'Liberation Sans',
+    'Segoe UI Light':       'Liberation Sans',
+    'Segoe UI Semibold':    'Liberation Sans',
+    'Segoe UI Bold':        'Liberation Sans',
+    'Segoe UI Italic':      'Liberation Sans',
+    'Gill Sans MT':         'Liberation Sans',
+    'Century Gothic':       'URW Gothic',
+    'Garamond':             'TeX Gyre Pagella',
+    'Palatino Linotype':    'TeX Gyre Pagella',
+    'Book Antiqua':         'TeX Gyre Pagella',
+    'Franklin Gothic Medium': 'Liberation Sans',
+    'Franklin Gothic Book': 'Liberation Sans',
 }
 
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif', '.webp'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.webp'}
 
 
 def allowed_file(filename):
@@ -35,13 +40,19 @@ def allowed_file(filename):
 
 
 def fix_image_orientation(data, filename):
-    """Corrige l'orientation EXIF des images JPEG/PNG."""
+    """Corrige l'orientation EXIF — preserve la qualite JPEG a 95%."""
     try:
         img = Image.open(io.BytesIO(data))
+        original_format = img.format
         img = ImageOps.exif_transpose(img)
         buf = io.BytesIO()
-        fmt = img.format if img.format else ('JPEG' if filename.lower().endswith(('.jpg', '.jpeg')) else 'PNG')
-        img.save(buf, format=fmt)
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in ('.jpg', '.jpeg') or original_format == 'JPEG':
+            img.save(buf, format='JPEG', quality=95, subsampling=0)
+        elif ext == '.png' or original_format == 'PNG':
+            img.save(buf, format='PNG', optimize=False)
+        else:
+            img.save(buf, format=original_format or 'PNG')
         return buf.getvalue()
     except Exception:
         return data
@@ -49,9 +60,7 @@ def fix_image_orientation(data, filename):
 
 def preprocess_docx(input_path, output_path):
     """
-    Pre-traitement du docx :
-    1. Remplace les noms de polices dans le XML pour correspondre aux polices installees
-    2. Corrige l'orientation EXIF des images embarquees
+    Corrige les images (EXIF) et remplace les noms de polices dans le XML.
     """
     with zipfile.ZipFile(input_path, 'r') as zin:
         with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:
@@ -74,12 +83,20 @@ def preprocess_docx(input_path, output_path):
                 zout.writestr(item, data)
 
 
-def convert_to_pdf(input_path, output_dir):
-    env = {**os.environ, 'HOME': '/root'}
+def convert_to_pdf(input_path, output_dir, profile_dir):
+    """
+    Chaque conversion utilise un profil LibreOffice isole pour eviter
+    les conflits de lock entre workers Gunicorn concurrents.
+    """
+    env = {
+        **os.environ,
+        'HOME': profile_dir,
+    }
 
     result = subprocess.run(
         [
             'libreoffice',
+            f'-env:UserInstallation=file://{profile_dir}',
             '--headless',
             '--norestore',
             '--nofirststartwizard',
@@ -132,22 +149,29 @@ def convert():
         return jsonify({'error': 'Fichier trop volumineux (max 50 MB)'}), 400
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        profile_dir = os.path.join(tmpdir, 'lo-profile')
+        os.makedirs(profile_dir, exist_ok=True)
+
         raw_path = os.path.join(tmpdir, 'original_' + file.filename)
         processed_path = os.path.join(tmpdir, file.filename)
         file.save(raw_path)
 
         try:
             preprocess_docx(raw_path, processed_path)
-            pdf_path = convert_to_pdf(processed_path, tmpdir)
+            pdf_path = convert_to_pdf(processed_path, tmpdir, profile_dir)
         except RuntimeError as e:
             return jsonify({'error': str(e)}), 500
 
-        return send_file(
-            pdf_path,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name=os.path.splitext(file.filename)[0] + '.pdf',
-        )
+        # Lire le PDF en memoire avant que le tempdir soit supprime
+        with open(pdf_path, 'rb') as f:
+            pdf_bytes = f.read()
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=os.path.splitext(file.filename)[0] + '.pdf',
+    )
 
 
 if __name__ == '__main__':
