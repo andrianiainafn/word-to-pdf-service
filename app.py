@@ -18,13 +18,17 @@ def convert_to_pdf(input_path, output_dir):
         [
             'libreoffice',
             '--headless',
-            '--convert-to', 'pdf',
+            '--norestore',
+            '--nofirststartwizard',
+            '--convert-to', 'pdf:writer_pdf_Export',
+            '--infilter=Microsoft Word 2007-2019 XML (.docx)',
             '--outdir', output_dir,
             input_path,
         ],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
+        env={**os.environ, 'HOME': '/root'},
     )
     if result.returncode != 0:
         raise RuntimeError(f'Conversion failed: {result.stderr}')
