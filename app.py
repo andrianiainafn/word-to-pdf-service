@@ -1,127 +1,58 @@
 import io
 import os
-import subprocess
-import tempfile
-import zipfile
 
+import cloudconvert
+import requests
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_file
-from PIL import Image, ImageOps
+
+load_dotenv()
 
 app = Flask(__name__)
 
 ALLOWED_EXTENSIONS = {'docx', 'doc'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
-FONT_MAP = {
-    'Calibri':              'Carlito',
-    'Calibri Light':        'Carlito',
-    'Calibri Bold':         'Carlito',
-    'Cambria':              'Caladea',
-    'Cambria Math':         'Caladea',
-    'Segoe UI':             'Liberation Sans',
-    'Segoe UI Light':       'Liberation Sans',
-    'Segoe UI Semibold':    'Liberation Sans',
-    'Segoe UI Bold':        'Liberation Sans',
-    'Segoe UI Italic':      'Liberation Sans',
-    'Gill Sans MT':         'Liberation Sans',
-    'Century Gothic':       'URW Gothic',
-    'Garamond':             'TeX Gyre Pagella',
-    'Palatino Linotype':    'TeX Gyre Pagella',
-    'Book Antiqua':         'TeX Gyre Pagella',
-    'Franklin Gothic Medium': 'Liberation Sans',
-    'Franklin Gothic Book': 'Liberation Sans',
-}
-
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.webp'}
+cloudconvert.configure(api_key=os.environ['CLOUDCONVERT_API_KEY'], sandbox=False)
 
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def fix_image_orientation(data, filename):
-    """Corrige l'orientation EXIF — preserve la qualite JPEG a 95%."""
-    try:
-        img = Image.open(io.BytesIO(data))
-        original_format = img.format
-        img = ImageOps.exif_transpose(img)
-        buf = io.BytesIO()
-        ext = os.path.splitext(filename)[1].lower()
-        if ext in ('.jpg', '.jpeg') or original_format == 'JPEG':
-            img.save(buf, format='JPEG', quality=95, subsampling=0)
-        elif ext == '.png' or original_format == 'PNG':
-            img.save(buf, format='PNG', optimize=False)
-        else:
-            img.save(buf, format=original_format or 'PNG')
-        return buf.getvalue()
-    except Exception:
-        return data
+def convert_with_cloudconvert(file_data, filename):
+    job = cloudconvert.Job.create(payload={
+        'tasks': {
+            'upload-file': {
+                'operation': 'import/upload',
+            },
+            'convert-file': {
+                'operation': 'convert',
+                'input': 'upload-file',
+                'input_format': filename.rsplit('.', 1)[1].lower(),
+                'output_format': 'pdf',
+                'engine': 'office',
+            },
+            'export-file': {
+                'operation': 'export/url',
+                'input': 'convert-file',
+            },
+        }
+    })
 
+    upload_task = next(t for t in job['tasks'] if t['name'] == 'upload-file')
+    cloudconvert.Task.upload(file_obj=io.BytesIO(file_data), task=upload_task)
 
-def preprocess_docx(input_path, output_path):
-    """
-    Corrige les images (EXIF) et remplace les noms de polices dans le XML.
-    """
-    with zipfile.ZipFile(input_path, 'r') as zin:
-        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                ext = os.path.splitext(item.filename)[1].lower()
+    job = cloudconvert.Job.wait(id=job['id'])
 
-                if item.filename.startswith('word/media/') and ext in IMAGE_EXTENSIONS:
-                    data = fix_image_orientation(data, item.filename)
+    export_task = next(t for t in job['tasks'] if t['name'] == 'export-file')
+    if export_task['status'] != 'finished':
+        raise RuntimeError('Conversion CloudConvert echouee')
 
-                elif item.filename.endswith('.xml') or item.filename.endswith('.rels'):
-                    try:
-                        text = data.decode('utf-8')
-                        for old_font, new_font in FONT_MAP.items():
-                            text = text.replace(f'"{old_font}"', f'"{new_font}"')
-                        data = text.encode('utf-8')
-                    except UnicodeDecodeError:
-                        pass
-
-                zout.writestr(item, data)
-
-
-def convert_to_pdf(input_path, output_dir, profile_dir):
-    """
-    Chaque conversion utilise un profil LibreOffice isole pour eviter
-    les conflits de lock entre workers Gunicorn concurrents.
-    """
-    env = {
-        **os.environ,
-        'HOME': profile_dir,
-    }
-
-    result = subprocess.run(
-        [
-            'libreoffice',
-            f'-env:UserInstallation=file://{profile_dir}',
-            '--headless',
-            '--norestore',
-            '--nofirststartwizard',
-            '--nologo',
-            '--convert-to',
-            'pdf:writer_pdf_Export:EmbedStandardFonts=true,UseTaggedPDF=true',
-            '--outdir', output_dir,
-            input_path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-        env=env,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f'Conversion echouee: {result.stderr}')
-
-    basename = os.path.splitext(os.path.basename(input_path))[0]
-    pdf_path = os.path.join(output_dir, f'{basename}.pdf')
-
-    if not os.path.exists(pdf_path):
-        raise RuntimeError('PDF non genere par LibreOffice')
-
-    return pdf_path
+    pdf_url = export_task['result']['files'][0]['url']
+    response = requests.get(pdf_url, timeout=60)
+    response.raise_for_status()
+    return response.content
 
 
 @app.route('/health', methods=['GET'])
@@ -148,23 +79,12 @@ def convert():
     if size > MAX_FILE_SIZE:
         return jsonify({'error': 'Fichier trop volumineux (max 50 MB)'}), 400
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        profile_dir = os.path.join(tmpdir, 'lo-profile')
-        os.makedirs(profile_dir, exist_ok=True)
+    file_data = file.read()
 
-        raw_path = os.path.join(tmpdir, 'original_' + file.filename)
-        processed_path = os.path.join(tmpdir, file.filename)
-        file.save(raw_path)
-
-        try:
-            preprocess_docx(raw_path, processed_path)
-            pdf_path = convert_to_pdf(processed_path, tmpdir, profile_dir)
-        except RuntimeError as e:
-            return jsonify({'error': str(e)}), 500
-
-        # Lire le PDF en memoire avant que le tempdir soit supprime
-        with open(pdf_path, 'rb') as f:
-            pdf_bytes = f.read()
+    try:
+        pdf_bytes = convert_with_cloudconvert(file_data, file.filename)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
     return send_file(
         io.BytesIO(pdf_bytes),
